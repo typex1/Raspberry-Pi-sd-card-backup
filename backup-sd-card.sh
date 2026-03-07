@@ -17,16 +17,38 @@ if ! command -v rpi-clone &> /dev/null; then
     exit 1
 fi
 
+# Check if second SD card is available
+if [[ ! -b /dev/sda ]]; then
+    echo "ERROR: No second SD card found at /dev/sda. Please insert a backup SD card."
+    exit 1
+fi
+
 LOG=../logs/95-backup-sd-card.log
 
 echo "------------------------------" >> "${LOG}"
 date >> "${LOG}"
 
+# Check if /dev/sda has valid Raspberry Pi partition structure
+FORCE_FLAG=""
+if [[ -b /dev/sda1 ]] && [[ -b /dev/sda2 ]]; then
+    # Check if sda1 is vfat and sda2 is ext4
+    SDA1_TYPE=$(sudo blkid -o value -s TYPE /dev/sda1 2>/dev/null)
+    SDA2_TYPE=$(sudo blkid -o value -s TYPE /dev/sda2 2>/dev/null)
+
+    if [[ "$SDA1_TYPE" == "vfat" ]] && [[ "$SDA2_TYPE" == "ext4" ]]; then
+        echo "Valid Raspberry Pi partition structure detected on /dev/sda. Using incremental mode." >> "${LOG}"
+    else
+        echo "Invalid partition structure on /dev/sda. Using force mode." >> "${LOG}"
+        FORCE_FLAG="-f"
+    fi
+else
+    echo "Partitions /dev/sda1 or /dev/sda2 not found. Using force mode." >> "${LOG}"
+    FORCE_FLAG="-f"
+fi
+
 echo "Starting rpi-clone to /dev/sda..." >> "${LOG}"
 
-# -f (force) is only needed for initial copy, afterwards, an incremental one suffices:
-#{ time (yes; echo) | sudo rpi-clone -f sda ; } >> "${LOG}" 2>&1
-{ time (yes; echo) | sudo rpi-clone sda ; } >> "${LOG}" 2>&1
+{ time (yes; echo) | sudo rpi-clone $FORCE_FLAG sda ; } >> "${LOG}" 2>&1
 
 echo "Backup completed with exit code $?" >> "${LOG}"
 
@@ -54,6 +76,7 @@ fi
 echo "Fixing cmdline.txt PARTUUID..." >> "${LOG}"
 
 sudo mkdir -p /mnt/backup_boot
+
 
 if sudo mount /dev/sda1 /mnt/backup_boot 2>/dev/null; then
     # Get the actual PARTUUID of the backup disk's root partition
